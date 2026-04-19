@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Football Box Wallpaper - Fixed</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+        #canvas-container {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 0;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 20px; left: 20px;
+            z-index: 100;
+            transition: opacity 0.5s ease;
+        }
+        .btn-wallpaper {
+            background: rgba(255,255,255,0.18);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.25);
+            color: #111;
+            padding: 12px 24px;
+            border-radius: 15px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            font-family: system-ui, sans-serif;
+        }
+        .btn-wallpaper:active { transform: scale(0.95); }
+        .hidden-ui { opacity: 0; pointer-events: none; }
+        .label {
+            color: rgba(0,0,0,0.35);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-left: 8px;
+            font-family: system-ui, sans-serif;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <button id="downloadBtn" class="btn-wallpaper">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 16l-5-5h3V4h4v7h3l-5 5zm9 4H3v-2h18v2z"/></svg>
+        Download
+    </button>
+    <button id="fullscreenBtn" class="btn-wallpaper">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+        Fullscreen
+    </button>
+    <p class="label">Full Screen Bounce &amp; Gravity ON</p>
+</div>
+
+<div id="canvas-container"></div>
+
+<script>
+    // ── CONFIG ──────────────────────────────────────────────
+    const BALL_COUNT    = 20;
+    const GRAVITY       = 0.006;
+    const BOUNCE_FACTOR = 1.02;
+    const SPEED_LIMIT   = 0.30;
+    const ballRadius    = 0.85;
+
+    // ── SCENE ───────────────────────────────────────────────
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xffffff);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 24);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+    // ── LIGHTS ──────────────────────────────────────────────
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLight.position.set(5, 20, 10);
+    dirLight.castShadow = true;
+    dirLight.shadow.camera.left   = -30;
+    dirLight.shadow.camera.right  =  30;
+    dirLight.shadow.camera.top    =  30;
+    dirLight.shadow.camera.bottom = -30;
+    dirLight.shadow.camera.near   = 0.5;
+    dirLight.shadow.camera.far    = 80;
+    dirLight.shadow.mapSize.set(2048, 2048);
+    scene.add(dirLight);
+
+    // ── BOX (room walls) ────────────────────────────────────
+    // boxLimits: the HALF-sizes the balls bounce inside
+    const boxLimits = { x: 1, y: 1, z: 5 };   // will be set by setupBox()
+
+    let boxMesh;
+    function setupBox() {
+        if (boxMesh) scene.remove(boxMesh);
+
+        const vFOV   = THREE.MathUtils.degToRad(camera.fov);
+        const height = 2 * Math.tan(vFOV / 2) * camera.position.z;
+        const width  = height * camera.aspect;
+
+        // ✅ FIX: store the actual half-extents so walls cover full screen
+        boxLimits.x = width  / 2;
+        boxLimits.y = height / 2;
+        boxLimits.z = 5;          // depth of the box
+
+        const geo = new THREE.BoxGeometry(width * 1.05, height * 1.05, boxLimits.z * 2);
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            side: THREE.BackSide,
+            roughness: 1.0
+        });
+        boxMesh = new THREE.Mesh(geo, mat);
+        boxMesh.receiveShadow = true;
+        scene.add(boxMesh);
+
+        // After box update, push any balls that are outside back in
+        balls && balls.forEach(b => {
+            b.position.x = THREE.MathUtils.clamp(b.position.x, -(boxLimits.x - ballRadius), boxLimits.x - ballRadius);
+            b.position.y = THREE.MathUtils.clamp(b.position.y, -(boxLimits.y - ballRadius), boxLimits.y - ballRadius);
+            b.position.z = THREE.MathUtils.clamp(b.position.z, -(boxLimits.z - ballRadius), boxLimits.z - ballRadius);
+        });
+    }
+
+    // ── FOOTBALL TEXTURE ────────────────────────────────────
+    function createFootballTexture() {
+        const c = document.createElement('canvas');
+        c.width = c.height = 512;
+        const ctx = c.getContext('2d');
+
+        // White base
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 512, 512);
+
+        // Black pentagon patches (simplified football pattern)
+        ctx.fillStyle = '#111111';
+        const patches = [
+            [256, 256, 60],
+            [140, 140, 45], [372, 140, 45],
+            [90,  300, 45], [422, 300, 45],
+            [200, 420, 45], [312, 420, 45],
+            [256, 60,  40], [60,  200, 38],
+            [452, 200, 38], [150, 470, 35],
+            [362, 470, 35]
+        ];
+        patches.forEach(([x, y, r]) => {
+            ctx.beginPath();
+            // Draw pentagon
+            for (let i = 0; i < 5; i++) {
+                const angle = (i * 2 * Math.PI / 5) - Math.PI / 2;
+                const px = x + r * Math.cos(angle);
+                const py = y + r * Math.sin(angle);
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+        });
+
+        // Seam lines
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(256, 196); ctx.lineTo(200, 280); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(256, 196); ctx.lineTo(312, 280); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(200, 280); ctx.lineTo(140, 185); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(312, 280); ctx.lineTo(372, 185); ctx.stroke();
+
+        return new THREE.CanvasTexture(c);
+    }
+
+    const ballTex = createFootballTexture();
+    const ballGeo = new THREE.SphereGeometry(ballRadius, 32, 32);
+
+    // ── CREATE BALLS ─────────────────────────────────────────
+    const balls = [];
+
+    // Call setupBox once first so boxLimits are ready
+    setupBox();
+
+    for (let i = 0; i < BALL_COUNT; i++) {
+        const mat = new THREE.MeshStandardMaterial({ map: ballTex, roughness: 0.35 });
+        const b   = new THREE.Mesh(ballGeo, mat);
+        b.castShadow    = true;
+        b.receiveShadow = true;
+
+        // ✅ FIX: spawn balls spread across FULL box area
+        b.position.set(
+            (Math.random() - 0.5) * (boxLimits.x * 2 - ballRadius * 2),
+            (Math.random() - 0.5) * (boxLimits.y * 2 - ballRadius * 2),
+            (Math.random() - 0.5) * (boxLimits.z * 2 - ballRadius * 2)
+        );
+
+        // ✅ FIX: give each ball a proper initial velocity in all directions
+        const speed = 0.08 + Math.random() * 0.10;
+        const theta = Math.random() * Math.PI * 2;
+        const phi   = Math.random() * Math.PI;
+        b.userData.vel = new THREE.Vector3(
+            speed * Math.sin(phi) * Math.cos(theta),
+            speed * Math.sin(phi) * Math.sin(theta),
+            speed * Math.cos(phi) * 0.4   // Z a bit less so not clipping camera
+        );
+
+        scene.add(b);
+        balls.push(b);
+    }
+
+    // ── PHYSICS ──────────────────────────────────────────────
+    const gravity = new THREE.Vector3(0, -GRAVITY, 0);
+
+    function updatePhysics() {
+        balls.forEach((b, i) => {
+            const vel = b.userData.vel;
+
+            // Gravity
+            vel.addScaledVector(gravity, 1);
+
+            // Speed cap
+            if (vel.length() > SPEED_LIMIT) vel.multiplyScalar(0.97);
+
+            // Move
+            b.position.add(vel);
+
+            // ✅ Wall collisions — using actual boxLimits
+            const lx = boxLimits.x - ballRadius;
+            const ly = boxLimits.y - ballRadius;
+            const lz = boxLimits.z - ballRadius;
+
+            if (b.position.x >  lx) { b.position.x =  lx; vel.x *= -BOUNCE_FACTOR; }
+            if (b.position.x < -lx) { b.position.x = -lx; vel.x *= -BOUNCE_FACTOR; }
+            if (b.position.y >  ly) { b.position.y =  ly; vel.y *= -BOUNCE_FACTOR; }
+            if (b.position.y < -ly) { b.position.y = -ly; vel.y *= -BOUNCE_FACTOR; }
+            if (b.position.z >  lz) { b.position.z =  lz; vel.z *= -BOUNCE_FACTOR; }
+            if (b.position.z < -lz) { b.position.z = -lz; vel.z *= -BOUNCE_FACTOR; }
+
+            // Ball-to-ball collisions
+            for (let j = i + 1; j < balls.length; j++) {
+                const b2   = balls[j];
+                const dVec = b.position.clone().sub(b2.position);
+                const dist = dVec.length();
+                if (dist < ballRadius * 2 && dist > 0.0001) {
+                    const normal = dVec.normalize();
+                    const relVel = vel.clone().sub(b2.userData.vel);
+                    const dot    = relVel.dot(normal);
+                    if (dot < 0) {
+                        const imp = normal.clone().multiplyScalar(dot * BOUNCE_FACTOR);
+                        vel.sub(imp);
+                        b2.userData.vel.add(imp);
+
+                        // Separate overlapping balls
+                        const overlap = (ballRadius * 2 - dist) / 2;
+                        b.position.addScaledVector(normal,  overlap);
+                        b2.position.addScaledVector(normal, -overlap);
+                    }
+                }
+            }
+
+            // Spin
+            b.rotation.x += vel.y * 0.3;
+            b.rotation.z -= vel.x * 0.3;
+        });
+    }
+
+    // ── UI ───────────────────────────────────────────────────
+    let uiTimer;
+    function resetUI() {
+        document.getElementById('ui-layer').classList.remove('hidden-ui');
+        clearTimeout(uiTimer);
+        uiTimer = setTimeout(() => {
+            document.getElementById('ui-layer').classList.add('hidden-ui');
+        }, 3000);
+    }
+
+    window.addEventListener('mousemove', (e) => {
+        resetUI();
+        gravity.x = ((e.clientX / window.innerWidth) - 0.5) * 0.04;
+        gravity.y = -GRAVITY + ((e.clientY / window.innerHeight) - 0.5) * -0.03;
+    });
+    window.addEventListener('touchmove', (e) => {
+        resetUI();
+        gravity.x = ((e.touches[0].clientX / window.innerWidth) - 0.5) * 0.04;
+        gravity.y = -GRAVITY + ((e.touches[0].clientY / window.innerHeight) - 0.5) * -0.03;
+    }, { passive: true });
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        setupBox();
+    });
+
+    document.getElementById('downloadBtn').onclick = (e) => {
+        e.stopPropagation();
+        const a = document.createElement('a');
+        a.href = 'data:text/html;charset=utf-8,' + encodeURIComponent(document.documentElement.outerHTML);
+        a.download = 'Football_Box_Wallpaper_Fixed.html';
+        a.click();
+    };
+    document.getElementById('fullscreenBtn').onclick = (e) => {
+        e.stopPropagation();
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(console.log);
+        } else {
+            document.exitFullscreen();
+        }
+    };
+
+    // ── ANIMATE ──────────────────────────────────────────────
+    function animate() {
+        requestAnimationFrame(animate);
+        updatePhysics();
+        renderer.render(scene, camera);
+    }
+
+    animate();
+    resetUI();
+</script>
+</body>
+</html>
