@@ -231,13 +231,12 @@ function setupBox() {
     const h     = 2 * Math.tan(vFOV / 2) * camera.position.z;
     box.x = (h * camera.aspect) / 2;
     box.y = h / 2;
-    if (typeof balls !== 'undefined' && balls.length) {
-        balls.forEach(b => {
-            b.position.x = THREE.MathUtils.clamp(b.position.x, -(box.x - BALL_RADIUS), box.x - BALL_RADIUS);
-            b.position.y = THREE.MathUtils.clamp(b.position.y, -(box.y - BALL_RADIUS), box.y - BALL_RADIUS);
-        });
-    }
+    balls && balls.forEach(b => {
+        b.position.x = THREE.MathUtils.clamp(b.position.x, -(box.x - BALL_RADIUS), box.x - BALL_RADIUS);
+        b.position.y = THREE.MathUtils.clamp(b.position.y, -(box.y - BALL_RADIUS), box.y - BALL_RADIUS);
+    });
 }
+setupBox();
 
 // ── BALLS ───────────────────────────────────────────────────────
 const balls = [];
@@ -248,9 +247,9 @@ for (let i = 0; i < BALL_COUNT; i++) {
     );
     b.castShadow = b.receiveShadow = true;
     b.position.set(
-        (Math.random() - 0.5) * 10,
-        (Math.random() - 0.5) * 6,
-        (Math.random() - 0.5) * 6
+        (Math.random() - 0.5) * box.x * 1.6,
+        (Math.random() - 0.5) * box.y * 1.6,
+        (Math.random() - 0.5) * box.z * 1.6
     );
     const speed = 0.07 + Math.random() * 0.09;
     const theta = Math.random() * Math.PI * 2;
@@ -263,9 +262,6 @@ for (let i = 0; i < BALL_COUNT; i++) {
     scene.add(b);
     balls.push(b);
 }
-
-// Call setupBox AFTER balls array is populated
-setupBox();
 
 // ── PHYSICS ─────────────────────────────────────────────────────
 const grav = new THREE.Vector3(0, -GRAVITY, 0);
